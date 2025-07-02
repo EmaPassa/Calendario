@@ -15,6 +15,8 @@ import {
   LogOut,
   CalendarIcon,
   AlertCircle,
+  Settings,
+  RefreshCw,
 } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import Link from "next/link"
@@ -68,6 +70,7 @@ export default function CalendarPage() {
   })
   const [loading, setLoading] = useState(true)
   const [dataSource, setDataSource] = useState<"sheets" | "mock">("mock")
+  const [lastFetch, setLastFetch] = useState<Date | null>(null)
 
   useEffect(() => {
     // Verificar si ya está autenticado
@@ -101,20 +104,27 @@ export default function CalendarPage() {
   const fetchEvents = async () => {
     try {
       setLoading(true)
+      console.log("Frontend: Fetching events...")
+
       const response = await fetch("/api/events")
       const data: ApiEvent[] = await response.json()
 
+      console.log("Frontend: Received data:", data)
+
       const eventsWithDates: Event[] = data.map(convertApiEventToEvent)
       setEvents(eventsWithDates)
+      setLastFetch(new Date())
 
       // Detectar si los datos vienen de Google Sheets o son mock
-      if (data.length > 0 && data[0].id.includes("entregas-") && data.length > 5) {
+      if (data.length > 0 && data.some((event) => event.id.includes("-") && event.id.split("-")[1])) {
         setDataSource("sheets")
+        console.log("Frontend: Using Google Sheets data")
       } else {
         setDataSource("mock")
+        console.log("Frontend: Using mock data")
       }
     } catch (error) {
-      console.error("Error fetching events:", error)
+      console.error("Frontend: Error fetching events:", error)
       setEvents([])
       setDataSource("mock")
     } finally {
@@ -292,6 +302,12 @@ export default function CalendarPage() {
               </div>
             </div>
             <div className="flex items-center space-x-3">
+              <Link href="/diagnostico">
+                <Button variant="outline" size="sm">
+                  <Settings className="h-4 w-4 mr-2" />
+                  Diagnóstico
+                </Button>
+              </Link>
               <Link href="/novedades">
                 <Button variant="outline">
                   <FileText className="h-4 w-4 mr-2" />
@@ -309,18 +325,37 @@ export default function CalendarPage() {
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Alerta sobre la fuente de datos */}
-        {dataSource === "mock" && (
-          <Alert className="mb-6">
-            <AlertCircle className="h-4 w-4" />
-            <AlertDescription>
-              <strong>Usando datos de ejemplo.</strong> Para cargar datos desde Google Sheets, asegúrate de que la hoja
-              sea pública y configure la API key.
-              <Link href="/configuracion" className="ml-2 text-blue-600 hover:underline">
-                Ver instrucciones de configuración
-              </Link>
-            </AlertDescription>
-          </Alert>
-        )}
+        <Alert
+          className={`mb-6 ${dataSource === "sheets" ? "border-green-200 bg-green-50" : "border-yellow-200 bg-yellow-50"}`}
+        >
+          <AlertCircle className={`h-4 w-4 ${dataSource === "sheets" ? "text-green-600" : "text-yellow-600"}`} />
+          <AlertDescription>
+            <div className="flex items-center justify-between">
+              <div>
+                <strong>
+                  {dataSource === "sheets" ? "✅ Conectado a Google Sheets" : "⚠️ Usando datos de ejemplo"}
+                </strong>
+                <div className="text-sm mt-1">
+                  {dataSource === "sheets"
+                    ? `Datos cargados desde Google Sheets. Última actualización: ${lastFetch?.toLocaleTimeString()}`
+                    : "No se pudo conectar a Google Sheets. Revisa la configuración."}
+                </div>
+              </div>
+              <div className="flex space-x-2">
+                <Button variant="outline" size="sm" onClick={fetchEvents}>
+                  <RefreshCw className="h-4 w-4 mr-1" />
+                  Actualizar
+                </Button>
+                <Link href="/diagnostico">
+                  <Button variant="outline" size="sm">
+                    <Settings className="h-4 w-4 mr-1" />
+                    Diagnóstico
+                  </Button>
+                </Link>
+              </div>
+            </div>
+          </AlertDescription>
+        </Alert>
 
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
           {/* Panel de filtros */}
