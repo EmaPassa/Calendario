@@ -17,6 +17,9 @@ import {
   AlertCircle,
   Settings,
   RefreshCw,
+  Wifi,
+  WifiOff,
+  Bug,
 } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import Link from "next/link"
@@ -25,6 +28,7 @@ import { formatDate } from "@/utils/date-helpers"
 import { convertApiEventToEvent, getDateLabel } from "@/utils/event-helpers"
 import type { Event, ApiEvent } from "@/types/event"
 import LoginForm from "@/components/login-form"
+import { GoogleSheetsClientService } from "@/lib/google-sheets-client"
 
 const eventTypeColors = {
   entregas: "#ef4444",
@@ -55,6 +59,43 @@ const monthNames = [
 
 const dayNames = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
 
+// Datos de ejemplo como fallback
+const mockEvents: ApiEvent[] = [
+  {
+    id: "mock-1",
+    title: "Entrega Proyecto Alpha",
+    type: "entregas",
+    description: "Entrega final del proyecto Alpha con toda la documentación requerida",
+    subject: "Proyecto Alpha - Entrega Final",
+    emailLink: "mailto:admin@eest6.edu.ar?subject=Proyecto Alpha",
+    completed: false,
+    fechaRecepcion: "2025-01-01T09:00:00.000Z",
+    fechaEntrega: "2025-01-15T09:00:00.000Z",
+  },
+  {
+    id: "mock-2",
+    title: "Convocatoria Becas 2025",
+    type: "convocatorias",
+    description: "Apertura de convocatoria para becas de investigación 2025",
+    subject: "Becas de Investigación 2025",
+    emailLink: "mailto:becas@eest6.edu.ar?subject=Convocatoria Becas 2025",
+    completed: false,
+    fechaRecepcion: "2024-12-20T10:00:00.000Z",
+    fechaConvocatoria: "2025-01-03T10:00:00.000Z",
+  },
+  {
+    id: "mock-3",
+    title: "Solicitud Presupuesto Q1",
+    type: "solicitudes",
+    description: "Solicitud de presupuesto para el primer trimestre del año",
+    subject: "Presupuesto Q1 2025",
+    emailLink: "mailto:finanzas@eest6.edu.ar?subject=Presupuesto Q1",
+    completed: false,
+    fechaRecepcion: "2024-12-28T14:00:00.000Z",
+    fechaSolicitud: "2025-01-08T14:00:00.000Z",
+  },
+]
+
 export default function CalendarPage() {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [events, setEvents] = useState<Event[]>([])
@@ -72,6 +113,12 @@ export default function CalendarPage() {
   const [dataSource, setDataSource] = useState<"sheets" | "mock">("mock")
   const [lastFetch, setLastFetch] = useState<Date | null>(null)
   const [eventCount, setEventCount] = useState(0)
+  const [connectionStatus, setConnectionStatus] = useState<"connected" | "disconnected" | "testing">("disconnected")
+  const [errorMessage, setErrorMessage] = useState<string>("")
+  const [debugInfo, setDebugInfo] = useState<any[]>([])
+
+  // Instancia del servicio de Google Sheets
+  const [sheetsService] = useState(() => new GoogleSheetsClientService())
 
   useEffect(() => {
     // Verificar si ya está autenticado
@@ -84,7 +131,7 @@ export default function CalendarPage() {
 
   useEffect(() => {
     if (isAuthenticated) {
-      fetchEvents()
+      fetchEventsFromSheets()
     }
   }, [isAuthenticated])
 
@@ -102,73 +149,74 @@ export default function CalendarPage() {
     localStorage.removeItem("eest6-auth")
   }
 
-  const fetchEvents = async () => {
+  const fetchEventsFromSheets = async () => {
     try {
       setLoading(true)
-      console.log("Frontend: Fetching events...")
+      setConnectionStatus("testing")
+      setErrorMessage("")
+      console.log("Frontend: Fetching events directly from Google Sheets...")
 
-      const response = await fetch("/api/events")
-      const data: ApiEvent[] = await response.json()
+      // Intentar cargar desde Google Sheets
+      const sheetsEvents = await sheetsService.getAllEvents()
 
-      console.log("Frontend: Received data:", data)
-      console.log("Frontend: Data length:", data.length)
-      console.log("Frontend: First event:", data[0])
-
-      const eventsWithDates: Event[] = data.map(convertApiEventToEvent)
+      console.log("Frontend: Successfully loaded from Google Sheets:", sheetsEvents.length, "events")
+      const eventsWithDates: Event[] = sheetsEvents.map(convertApiEventToEvent)
       setEvents(eventsWithDates)
-      setEventCount(data.length)
+      setEventCount(sheetsEvents.length)
+      setDataSource("sheets")
+      setConnectionStatus("connected")
       setLastFetch(new Date())
 
-      // Mejorar la detección de la fuente de datos
-      const isFromSheets = detectDataSource(data)
-      setDataSource(isFromSheets ? "sheets" : "mock")
-
-      console.log("Frontend: Data source detected as:", isFromSheets ? "Google Sheets" : "Mock")
+      // Obtener información de debug
+      const debug = await sheetsService.getDebugInfo()
+      setDebugInfo(debug)
     } catch (error) {
-      console.error("Frontend: Error fetching events:", error)
-      setEvents([])
+      console.error("Frontend: Error fetching events from Google Sheets:", error)
+      setErrorMessage(error instanceof Error ? error.message : "Error desconocido")
+
+      // Usar datos mock como fallback
+      console.log("Frontend: Using mock data as fallback")
+      const eventsWithDates: Event[] = mockEvents.map(convertApiEventToEvent)
+      setEvents(eventsWithDates)
+      setEventCount(mockEvents.length)
       setDataSource("mock")
-      setEventCount(0)
+      setConnectionStatus("disconnected")
+
+      // Intentar obtener información de debug incluso si falló
+      try {
+        const debug = await sheetsService.getDebugInfo()
+        setDebugInfo(debug)
+      } catch (debugError) {
+        console.error("Frontend: Error getting debug info:", debugError)
+      }
     } finally {
       setLoading(false)
     }
   }
 
-  const detectDataSource = (data: ApiEvent[]): boolean => {
-    if (!data || data.length === 0) {
-      console.log("Detection: No data received")
-      return false
+  const testConnection = async () => {
+    try {
+      setConnectionStatus("testing")
+      console.log("Frontend: Testing Google Sheets connection...")
+
+      const testResult = await sheetsService.testConnection()
+
+      if (testResult.success) {
+        console.log("Frontend: Connection test successful")
+        setConnectionStatus("connected")
+        setErrorMessage("")
+        // Recargar eventos después de una prueba exitosa
+        await fetchEventsFromSheets()
+      } else {
+        console.log("Frontend: Connection test failed:", testResult.error)
+        setConnectionStatus("disconnected")
+        setErrorMessage(testResult.error || "Error de conexión")
+      }
+    } catch (error) {
+      console.error("Frontend: Connection test error:", error)
+      setConnectionStatus("disconnected")
+      setErrorMessage(error instanceof Error ? error.message : "Error de conexión")
     }
-
-    // Verificar si los datos tienen la estructura de Google Sheets
-    const hasGoogleSheetsStructure = data.some((event) => {
-      // Los eventos de Google Sheets tienen IDs como "entregas-1", "convocatorias-2", etc.
-      const hasCorrectIdFormat = /^(entregas|convocatorias|solicitudes)-\d+$/.test(event.id)
-
-      // Verificar que tenga las fechas específicas según el tipo
-      const hasSpecificDates =
-        (event.type === "entregas" && event.fechaEntrega) ||
-        (event.type === "convocatorias" && event.fechaConvocatoria) ||
-        (event.type === "solicitudes" && event.fechaSolicitud)
-
-      console.log(
-        `Detection: Event ${event.id} - ID format: ${hasCorrectIdFormat}, Specific dates: ${hasSpecificDates}`,
-      )
-
-      return hasCorrectIdFormat && hasSpecificDates
-    })
-
-    // Si tenemos más de 3 eventos con estructura correcta, probablemente es de Google Sheets
-    const sheetsEventsCount = data.filter((event) => /^(entregas|convocatorias|solicitudes)-\d+$/.test(event.id)).length
-
-    console.log(`Detection: Found ${sheetsEventsCount} events with Google Sheets structure`)
-
-    // Si tenemos eventos con estructura de Google Sheets, es de Sheets
-    const isFromSheets = hasGoogleSheetsStructure && sheetsEventsCount > 0
-
-    console.log(`Detection: Final result - isFromSheets: ${isFromSheets}`)
-
-    return isFromSheets
   }
 
   const filterEvents = () => {
@@ -181,23 +229,10 @@ export default function CalendarPage() {
   }
 
   const toggleEventCompletion = async (eventId: string) => {
-    try {
-      const response = await fetch("/api/events/toggle", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ eventId }),
-      })
-
-      if (response.ok) {
-        setEvents((prev) =>
-          prev.map((event) => (event.id === eventId ? { ...event, completed: !event.completed } : event)),
-        )
-        if (selectedEvent?.id === eventId) {
-          setSelectedEvent((prev) => (prev ? { ...prev, completed: !prev.completed } : null))
-        }
-      }
-    } catch (error) {
-      console.error("Error toggling event completion:", error)
+    // Solo cambiar localmente ya que no tenemos API para persistir
+    setEvents((prev) => prev.map((event) => (event.id === eventId ? { ...event, completed: !event.completed } : event)))
+    if (selectedEvent?.id === eventId) {
+      setSelectedEvent((prev) => (prev ? { ...prev, completed: !prev.completed } : null))
     }
   }
 
@@ -318,7 +353,8 @@ export default function CalendarPage() {
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Cargando eventos...</p>
+          <p className="text-gray-600">Cargando eventos desde Google Sheets...</p>
+          <p className="text-sm text-gray-500 mt-2">Conectando directamente con la hoja de cálculo...</p>
         </div>
       </div>
     )
@@ -367,7 +403,12 @@ export default function CalendarPage() {
         <Alert
           className={`mb-6 ${dataSource === "sheets" ? "border-green-200 bg-green-50" : "border-yellow-200 bg-yellow-50"}`}
         >
-          <AlertCircle className={`h-4 w-4 ${dataSource === "sheets" ? "text-green-600" : "text-yellow-600"}`} />
+          <div className="flex items-center">
+            {connectionStatus === "connected" && <Wifi className="h-4 w-4 text-green-600 mr-2" />}
+            {connectionStatus === "disconnected" && <WifiOff className="h-4 w-4 text-red-600 mr-2" />}
+            {connectionStatus === "testing" && <RefreshCw className="h-4 w-4 text-blue-600 mr-2 animate-spin" />}
+            <AlertCircle className={`h-4 w-4 ${dataSource === "sheets" ? "text-green-600" : "text-yellow-600"}`} />
+          </div>
           <AlertDescription>
             <div className="flex items-center justify-between">
               <div>
@@ -376,21 +417,24 @@ export default function CalendarPage() {
                 </strong>
                 <div className="text-sm mt-1">
                   {dataSource === "sheets"
-                    ? `${eventCount} eventos cargados desde Google Sheets. Última actualización: ${lastFetch?.toLocaleTimeString()}`
-                    : `${eventCount} eventos de ejemplo cargados. No se detectó conexión con Google Sheets.`}
+                    ? `${eventCount} eventos cargados directamente desde Google Sheets. Última actualización: ${lastFetch?.toLocaleTimeString()}`
+                    : `${eventCount} eventos de ejemplo. ${errorMessage ? `Error: ${errorMessage}` : "No se pudo conectar con Google Sheets."}`}
                 </div>
               </div>
               <div className="flex space-x-2">
-                <Button variant="outline" size="sm" onClick={fetchEvents} disabled={loading}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={fetchEventsFromSheets}
+                  disabled={loading || connectionStatus === "testing"}
+                >
                   <RefreshCw className={`h-4 w-4 mr-1 ${loading ? "animate-spin" : ""}`} />
                   Actualizar
                 </Button>
-                <Link href="/diagnostico">
-                  <Button variant="outline" size="sm">
-                    <Settings className="h-4 w-4 mr-1" />
-                    Diagnóstico
-                  </Button>
-                </Link>
+                <Button variant="outline" size="sm" onClick={testConnection} disabled={connectionStatus === "testing"}>
+                  <Wifi className="h-4 w-4 mr-1" />
+                  Probar Conexión
+                </Button>
               </div>
             </div>
           </AlertDescription>
@@ -401,7 +445,14 @@ export default function CalendarPage() {
           <div className="lg:col-span-1">
             <Card>
               <CardHeader>
-                <CardTitle className="text-lg">Filtros</CardTitle>
+                <CardTitle className="text-lg flex items-center">
+                  Filtros
+                  <div className="ml-2">
+                    {connectionStatus === "connected" && <Wifi className="h-4 w-4 text-green-500" />}
+                    {connectionStatus === "disconnected" && <WifiOff className="h-4 w-4 text-red-500" />}
+                    {connectionStatus === "testing" && <RefreshCw className="h-4 w-4 text-blue-500 animate-spin" />}
+                  </div>
+                </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div>
@@ -457,9 +508,17 @@ export default function CalendarPage() {
                     Total de eventos: <span className="font-medium">{filteredEvents.length}</span>
                   </p>
                   <p className="text-xs text-gray-500 mt-1">
-                    Fuente: {dataSource === "sheets" ? "Google Sheets" : "Datos de ejemplo"}
+                    Fuente: {dataSource === "sheets" ? "Google Sheets (Directo)" : "Datos de ejemplo"}
                   </p>
                   <p className="text-xs text-gray-500">Eventos cargados: {eventCount}</p>
+                  <p className="text-xs text-gray-500">
+                    Estado:{" "}
+                    {connectionStatus === "connected"
+                      ? "Conectado"
+                      : connectionStatus === "testing"
+                        ? "Probando..."
+                        : "Desconectado"}
+                  </p>
                 </div>
 
                 <div className="pt-4 border-t">
@@ -480,16 +539,38 @@ export default function CalendarPage() {
                   </div>
                 </div>
 
-                {/* Debug info */}
+                {/* Debug info mejorado */}
                 <div className="pt-4 border-t">
                   <details className="text-xs">
-                    <summary className="cursor-pointer text-gray-500">Debug Info</summary>
+                    <summary className="cursor-pointer text-gray-500 flex items-center">
+                      <Bug className="h-3 w-3 mr-1" />
+                      Debug Info
+                    </summary>
                     <div className="mt-2 space-y-1 text-gray-400">
                       <div>Data Source: {dataSource}</div>
+                      <div>Connection: {connectionStatus}</div>
                       <div>Event Count: {eventCount}</div>
                       <div>Last Fetch: {lastFetch?.toLocaleString()}</div>
                       <div>Events: {events.length}</div>
                       <div>Filtered: {filteredEvents.length}</div>
+                      {errorMessage && <div>Error: {errorMessage}</div>}
+
+                      {debugInfo.length > 0 && (
+                        <div className="mt-2 pt-2 border-t border-gray-300">
+                          <div className="font-medium">Hojas de Google Sheets:</div>
+                          {debugInfo.map((info, index) => (
+                            <div key={index} className="ml-2">
+                              <div>
+                                {info.sheet}: {info.rowCount} filas
+                              </div>
+                              {info.isEmpty && <div className="text-red-400"> ⚠️ Vacía</div>}
+                              {info.header.length > 0 && (
+                                <div className="text-xs"> Header: {info.header.join(", ")}</div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </details>
                 </div>
@@ -497,7 +578,7 @@ export default function CalendarPage() {
             </Card>
           </div>
 
-          {/* Calendario */}
+          {/* Resto del calendario - sin cambios */}
           <div className="lg:col-span-3">
             <Card className="calendar-card">
               <CardContent className="p-6">

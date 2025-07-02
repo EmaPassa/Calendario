@@ -5,11 +5,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
-import { ArrowLeft, Calendar, Mail, ExternalLink, LogOut, Filter } from "lucide-react"
+import { ArrowLeft, Calendar, Mail, ExternalLink, LogOut, Filter, RefreshCw, Wifi, WifiOff } from "lucide-react"
 import Link from "next/link"
 import Image from "next/image"
 import { formatDate, formatRelativeDate } from "@/utils/date-helpers"
+import { convertApiEventToEvent } from "@/utils/event-helpers"
 import LoginForm from "@/components/login-form"
+import { GoogleSheetsClientService } from "@/lib/google-sheets-client"
 
 interface NewsItem {
   id: string
@@ -35,11 +37,49 @@ const eventTypeLabels = {
   solicitudes: "Solicitudes",
 }
 
+// Datos de ejemplo para novedades
+const mockNews: NewsItem[] = [
+  {
+    id: "mock-1",
+    title: "Nueva Convocatoria de Investigación",
+    type: "convocatorias",
+    description: "Se ha abierto una nueva convocatoria para proyectos de investigación en tecnología",
+    subject: "Convocatoria Investigación Tech 2025",
+    emailLink: "mailto:investigacion@eest6.edu.ar?subject=Nueva Convocatoria",
+    date: "2025-01-10T00:00:00.000Z",
+    isNew: true,
+    completed: false,
+  },
+  {
+    id: "mock-2",
+    title: "Actualización Entrega Proyecto Beta",
+    type: "entregas",
+    description: "Se ha actualizado la fecha de entrega del proyecto Beta para el 15 de enero",
+    subject: "Proyecto Beta - Cambio de Fecha",
+    emailLink: "mailto:proyectos@eest6.edu.ar?subject=Proyecto Beta",
+    date: "2025-01-08T00:00:00.000Z",
+    isNew: true,
+    completed: true,
+  },
+  {
+    id: "mock-3",
+    title: "Nueva Solicitud de Equipamiento",
+    type: "solicitudes",
+    description: "Solicitud urgente de equipamiento para el laboratorio de electrónica",
+    subject: "Solicitud Equipamiento Lab Electrónica",
+    emailLink: "mailto:compras@eest6.edu.ar?subject=Equipamiento",
+    date: "2025-01-05T00:00:00.000Z",
+    isNew: false,
+    completed: false,
+  },
+]
+
 export default function NovedadesPage() {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [news, setNews] = useState<NewsItem[]>([])
   const [filteredNews, setFilteredNews] = useState<NewsItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [connectionStatus, setConnectionStatus] = useState<"connected" | "disconnected" | "testing">("disconnected")
   const [filters, setFilters] = useState({
     entregas: true,
     convocatorias: true,
@@ -49,11 +89,14 @@ export default function NovedadesPage() {
     showOnlyNew: false,
   })
 
+  // Instancia del servicio de Google Sheets
+  const [sheetsService] = useState(() => new GoogleSheetsClientService())
+
   useEffect(() => {
     const authStatus = localStorage.getItem("eest6-auth")
     if (authStatus === "authenticated") {
       setIsAuthenticated(true)
-      fetchNews()
+      fetchNewsFromSheets()
     } else {
       setLoading(false)
     }
@@ -66,7 +109,7 @@ export default function NovedadesPage() {
   const handleLogin = (password: string) => {
     setIsAuthenticated(true)
     localStorage.setItem("eest6-auth", "authenticated")
-    fetchNews()
+    fetchNewsFromSheets()
   }
 
   const handleLogout = () => {
@@ -74,21 +117,48 @@ export default function NovedadesPage() {
     localStorage.removeItem("eest6-auth")
   }
 
-  const fetchNews = async () => {
+  const fetchNewsFromSheets = async () => {
     try {
       setLoading(true)
-      const response = await fetch("/api/news")
-      const data = await response.json()
+      setConnectionStatus("testing")
+      console.log("Novedades: Fetching news directly from Google Sheets...")
 
-      if (Array.isArray(data)) {
-        setNews(data)
+      // Intentar cargar desde Google Sheets
+      const sheetsEvents = await sheetsService.getAllEvents()
+
+      if (sheetsEvents.length > 0) {
+        console.log("Novedades: Successfully loaded from Google Sheets:", sheetsEvents.length, "events")
+
+        // Convertir eventos a formato de noticias
+        const newsItems: NewsItem[] = sheetsEvents.map((event) => {
+          const eventWithDates = convertApiEventToEvent(event)
+          const sevenDaysAgo = new Date()
+          sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
+
+          return {
+            id: event.id,
+            title: event.title,
+            type: event.type,
+            description: event.description,
+            subject: event.subject,
+            emailLink: event.emailLink,
+            date: eventWithDates.effectiveDate.toISOString(),
+            isNew: eventWithDates.effectiveDate >= sevenDaysAgo,
+            completed: event.completed,
+          }
+        })
+
+        setNews(newsItems)
+        setConnectionStatus("connected")
       } else {
-        console.error("Invalid news data format:", data)
-        setNews([])
+        console.log("Novedades: No events from Google Sheets, using mock data")
+        setNews(mockNews)
+        setConnectionStatus("disconnected")
       }
     } catch (error) {
-      console.error("Error fetching news:", error)
-      setNews([])
+      console.error("Novedades: Error fetching news from Google Sheets:", error)
+      setNews(mockNews)
+      setConnectionStatus("disconnected")
     } finally {
       setLoading(false)
     }
@@ -118,20 +188,9 @@ export default function NovedadesPage() {
     setFilters((prev) => ({ ...prev, [filterType]: !prev[filterType] }))
   }
 
-  const toggleNewsCompletion = async (newsId: string) => {
-    try {
-      const response = await fetch("/api/events/toggle", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ eventId: newsId }),
-      })
-
-      if (response.ok) {
-        setNews((prev) => prev.map((item) => (item.id === newsId ? { ...item, completed: !item.completed } : item)))
-      }
-    } catch (error) {
-      console.error("Error toggling news completion:", error)
-    }
+  const toggleNewsCompletion = (newsId: string) => {
+    // Solo cambiar localmente ya que no tenemos API para persistir
+    setNews((prev) => prev.map((item) => (item.id === newsId ? { ...item, completed: !item.completed } : item)))
   }
 
   if (!isAuthenticated) {
@@ -143,7 +202,8 @@ export default function NovedadesPage() {
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <Calendar className="h-12 w-12 animate-spin mx-auto mb-4 text-green-600" />
-          <p className="text-gray-600">Cargando novedades...</p>
+          <p className="text-gray-600">Cargando novedades desde Google Sheets...</p>
+          <p className="text-sm text-gray-500 mt-2">Conectando directamente con la hoja de cálculo...</p>
         </div>
       </div>
     )
@@ -157,11 +217,25 @@ export default function NovedadesPage() {
             <div className="flex items-center space-x-4">
               <Image src="/logo-eest6.png" alt="Logo E.E.S.T. N° 6" width={50} height={50} className="rounded-lg" />
               <div>
-                <h1 className="text-2xl font-bold text-gray-900">Novedades - E.E.S.T. n° 6</h1>
-                <p className="text-sm text-gray-600">Banfield - Lomas de Zamora</p>
+                <h1 className="text-2xl font-bold text-gray-900 flex items-center">
+                  Novedades - E.E.S.T. n° 6
+                  <div className="ml-2">
+                    {connectionStatus === "connected" && <Wifi className="h-4 w-4 text-green-500" />}
+                    {connectionStatus === "disconnected" && <WifiOff className="h-4 w-4 text-red-500" />}
+                    {connectionStatus === "testing" && <RefreshCw className="h-4 w-4 text-blue-500 animate-spin" />}
+                  </div>
+                </h1>
+                <p className="text-sm text-gray-600">
+                  Banfield - Lomas de Zamora •{" "}
+                  {connectionStatus === "connected" ? "Conectado a Google Sheets" : "Datos de ejemplo"}
+                </p>
               </div>
             </div>
             <div className="flex items-center space-x-3">
+              <Button variant="outline" size="sm" onClick={fetchNewsFromSheets} disabled={loading}>
+                <RefreshCw className={`h-4 w-4 mr-1 ${loading ? "animate-spin" : ""}`} />
+                Actualizar
+              </Button>
               <Link href="/">
                 <Button variant="outline" size="sm">
                   <ArrowLeft className="h-4 w-4 mr-2" />
@@ -273,6 +347,9 @@ export default function NovedadesPage() {
                       <span className="font-medium text-gray-500">
                         {filteredNews.filter((item) => item.completed).length}
                       </span>
+                    </p>
+                    <p className="text-xs text-gray-500 pt-2 border-t">
+                      Fuente: {connectionStatus === "connected" ? "Google Sheets (Directo)" : "Datos de ejemplo"}
                     </p>
                   </div>
                 </div>
