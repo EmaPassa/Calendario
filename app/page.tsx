@@ -6,7 +6,17 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { ChevronLeft, ChevronRight, FileText, Mail, ExternalLink, LogOut, CalendarIcon } from "lucide-react"
+import {
+  ChevronLeft,
+  ChevronRight,
+  FileText,
+  Mail,
+  ExternalLink,
+  LogOut,
+  CalendarIcon,
+  AlertCircle,
+} from "lucide-react"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import Link from "next/link"
 import Image from "next/image"
 import { formatDate } from "@/utils/date-helpers"
@@ -57,6 +67,7 @@ export default function CalendarPage() {
     showPending: true,
   })
   const [loading, setLoading] = useState(true)
+  const [dataSource, setDataSource] = useState<"sheets" | "mock">("mock")
 
   useEffect(() => {
     // Verificar si ya está autenticado
@@ -95,9 +106,17 @@ export default function CalendarPage() {
 
       const eventsWithDates: Event[] = data.map(convertApiEventToEvent)
       setEvents(eventsWithDates)
+
+      // Detectar si los datos vienen de Google Sheets o son mock
+      if (data.length > 0 && data[0].id.includes("entregas-") && data.length > 5) {
+        setDataSource("sheets")
+      } else {
+        setDataSource("mock")
+      }
     } catch (error) {
       console.error("Error fetching events:", error)
       setEvents([])
+      setDataSource("mock")
     } finally {
       setLoading(false)
     }
@@ -289,6 +308,20 @@ export default function CalendarPage() {
       </header>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Alerta sobre la fuente de datos */}
+        {dataSource === "mock" && (
+          <Alert className="mb-6">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>
+              <strong>Usando datos de ejemplo.</strong> Para cargar datos desde Google Sheets, asegúrate de que la hoja
+              sea pública y configure la API key.
+              <Link href="/configuracion" className="ml-2 text-blue-600 hover:underline">
+                Ver instrucciones de configuración
+              </Link>
+            </AlertDescription>
+          </Alert>
+        )}
+
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
           {/* Panel de filtros */}
           <div className="lg:col-span-1">
@@ -349,22 +382,25 @@ export default function CalendarPage() {
                   <p className="text-sm text-gray-600">
                     Total de eventos: <span className="font-medium">{filteredEvents.length}</span>
                   </p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Fuente: {dataSource === "sheets" ? "Google Sheets" : "Datos de ejemplo"}
+                  </p>
                 </div>
 
                 <div className="pt-4 border-t">
-                  <h3 className="font-medium mb-2 text-sm">Información de fechas</h3>
+                  <h3 className="font-medium mb-2 text-sm">Estructura de fechas</h3>
                   <div className="space-y-1 text-xs text-gray-600">
                     <div className="flex items-center space-x-2">
                       <div className="w-2 h-2 rounded bg-red-500"></div>
-                      <span>Entregas: por fecha de entrega</span>
+                      <span>Entregas: Fecha Entrega</span>
                     </div>
                     <div className="flex items-center space-x-2">
                       <div className="w-2 h-2 rounded bg-blue-500"></div>
-                      <span>Convocatorias: por fecha de convocatoria</span>
+                      <span>Convocatorias: Fecha Convocatoria</span>
                     </div>
                     <div className="flex items-center space-x-2">
                       <div className="w-2 h-2 rounded bg-green-500"></div>
-                      <span>Solicitudes: por fecha de solicitud</span>
+                      <span>Solicitudes: Fecha Solicitud</span>
                     </div>
                   </div>
                 </div>
@@ -533,6 +569,10 @@ export default function CalendarPage() {
               <div className="bg-gray-50 p-3 rounded-lg">
                 <h4 className="font-medium text-sm text-gray-700 mb-2">Fechas del evento</h4>
                 <div className="space-y-1 text-xs">
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Fecha de Recepción:</span>
+                    <span className="font-medium">{formatDate(selectedEvent.fechaRecepcion)}</span>
+                  </div>
                   {selectedEvent.fechaSolicitud && (
                     <div className="flex justify-between">
                       <span className="text-gray-600">Fecha de Solicitud:</span>
@@ -556,7 +596,7 @@ export default function CalendarPage() {
 
               {selectedEvent.emailLink && (
                 <div>
-                  <h4 className="font-medium text-sm text-gray-700 mb-1">Enlace al correo</h4>
+                  <h4 className="font-medium text-sm text-gray-700 mb-1">Enlace</h4>
                   <a
                     href={selectedEvent.emailLink}
                     target="_blank"
@@ -564,7 +604,7 @@ export default function CalendarPage() {
                     className="text-blue-600 hover:text-blue-800 text-sm flex items-center"
                   >
                     <Mail className="h-4 w-4 mr-1" />
-                    Abrir correo
+                    Abrir enlace
                     <ExternalLink className="h-3 w-3 ml-1" />
                   </a>
                 </div>
