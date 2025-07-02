@@ -71,6 +71,7 @@ export default function CalendarPage() {
   const [loading, setLoading] = useState(true)
   const [dataSource, setDataSource] = useState<"sheets" | "mock">("mock")
   const [lastFetch, setLastFetch] = useState<Date | null>(null)
+  const [eventCount, setEventCount] = useState(0)
 
   useEffect(() => {
     // Verificar si ya está autenticado
@@ -110,26 +111,64 @@ export default function CalendarPage() {
       const data: ApiEvent[] = await response.json()
 
       console.log("Frontend: Received data:", data)
+      console.log("Frontend: Data length:", data.length)
+      console.log("Frontend: First event:", data[0])
 
       const eventsWithDates: Event[] = data.map(convertApiEventToEvent)
       setEvents(eventsWithDates)
+      setEventCount(data.length)
       setLastFetch(new Date())
 
-      // Detectar si los datos vienen de Google Sheets o son mock
-      if (data.length > 0 && data.some((event) => event.id.includes("-") && event.id.split("-")[1])) {
-        setDataSource("sheets")
-        console.log("Frontend: Using Google Sheets data")
-      } else {
-        setDataSource("mock")
-        console.log("Frontend: Using mock data")
-      }
+      // Mejorar la detección de la fuente de datos
+      const isFromSheets = detectDataSource(data)
+      setDataSource(isFromSheets ? "sheets" : "mock")
+
+      console.log("Frontend: Data source detected as:", isFromSheets ? "Google Sheets" : "Mock")
     } catch (error) {
       console.error("Frontend: Error fetching events:", error)
       setEvents([])
       setDataSource("mock")
+      setEventCount(0)
     } finally {
       setLoading(false)
     }
+  }
+
+  const detectDataSource = (data: ApiEvent[]): boolean => {
+    if (!data || data.length === 0) {
+      console.log("Detection: No data received")
+      return false
+    }
+
+    // Verificar si los datos tienen la estructura de Google Sheets
+    const hasGoogleSheetsStructure = data.some((event) => {
+      // Los eventos de Google Sheets tienen IDs como "entregas-1", "convocatorias-2", etc.
+      const hasCorrectIdFormat = /^(entregas|convocatorias|solicitudes)-\d+$/.test(event.id)
+
+      // Verificar que tenga las fechas específicas según el tipo
+      const hasSpecificDates =
+        (event.type === "entregas" && event.fechaEntrega) ||
+        (event.type === "convocatorias" && event.fechaConvocatoria) ||
+        (event.type === "solicitudes" && event.fechaSolicitud)
+
+      console.log(
+        `Detection: Event ${event.id} - ID format: ${hasCorrectIdFormat}, Specific dates: ${hasSpecificDates}`,
+      )
+
+      return hasCorrectIdFormat && hasSpecificDates
+    })
+
+    // Si tenemos más de 3 eventos con estructura correcta, probablemente es de Google Sheets
+    const sheetsEventsCount = data.filter((event) => /^(entregas|convocatorias|solicitudes)-\d+$/.test(event.id)).length
+
+    console.log(`Detection: Found ${sheetsEventsCount} events with Google Sheets structure`)
+
+    // Si tenemos eventos con estructura de Google Sheets, es de Sheets
+    const isFromSheets = hasGoogleSheetsStructure && sheetsEventsCount > 0
+
+    console.log(`Detection: Final result - isFromSheets: ${isFromSheets}`)
+
+    return isFromSheets
   }
 
   const filterEvents = () => {
@@ -337,13 +376,13 @@ export default function CalendarPage() {
                 </strong>
                 <div className="text-sm mt-1">
                   {dataSource === "sheets"
-                    ? `Datos cargados desde Google Sheets. Última actualización: ${lastFetch?.toLocaleTimeString()}`
-                    : "No se pudo conectar a Google Sheets. Revisa la configuración."}
+                    ? `${eventCount} eventos cargados desde Google Sheets. Última actualización: ${lastFetch?.toLocaleTimeString()}`
+                    : `${eventCount} eventos de ejemplo cargados. No se detectó conexión con Google Sheets.`}
                 </div>
               </div>
               <div className="flex space-x-2">
-                <Button variant="outline" size="sm" onClick={fetchEvents}>
-                  <RefreshCw className="h-4 w-4 mr-1" />
+                <Button variant="outline" size="sm" onClick={fetchEvents} disabled={loading}>
+                  <RefreshCw className={`h-4 w-4 mr-1 ${loading ? "animate-spin" : ""}`} />
                   Actualizar
                 </Button>
                 <Link href="/diagnostico">
@@ -420,6 +459,7 @@ export default function CalendarPage() {
                   <p className="text-xs text-gray-500 mt-1">
                     Fuente: {dataSource === "sheets" ? "Google Sheets" : "Datos de ejemplo"}
                   </p>
+                  <p className="text-xs text-gray-500">Eventos cargados: {eventCount}</p>
                 </div>
 
                 <div className="pt-4 border-t">
@@ -438,6 +478,20 @@ export default function CalendarPage() {
                       <span>Solicitudes: Fecha Solicitud</span>
                     </div>
                   </div>
+                </div>
+
+                {/* Debug info */}
+                <div className="pt-4 border-t">
+                  <details className="text-xs">
+                    <summary className="cursor-pointer text-gray-500">Debug Info</summary>
+                    <div className="mt-2 space-y-1 text-gray-400">
+                      <div>Data Source: {dataSource}</div>
+                      <div>Event Count: {eventCount}</div>
+                      <div>Last Fetch: {lastFetch?.toLocaleString()}</div>
+                      <div>Events: {events.length}</div>
+                      <div>Filtered: {filteredEvents.length}</div>
+                    </div>
+                  </details>
                 </div>
               </CardContent>
             </Card>

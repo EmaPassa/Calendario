@@ -12,7 +12,7 @@ export class GoogleSheetsService {
   async getSheetDataAsCSV(sheetName: string) {
     try {
       const url = `${this.baseUrl}${encodeURIComponent(sheetName)}`
-      console.log(`Fetching data from: ${url}`)
+      console.log(`GoogleSheets: Fetching data from: ${url}`)
 
       const response = await fetch(url, {
         method: "GET",
@@ -26,7 +26,7 @@ export class GoogleSheetsService {
       }
 
       const csvText = await response.text()
-      console.log(`CSV data for ${sheetName}:`, csvText.substring(0, 200) + "...")
+      console.log(`GoogleSheets: CSV data for ${sheetName}:`, csvText.substring(0, 200) + "...")
 
       // Parsear CSV manualmente
       const lines = csvText.split("\n").filter((line) => line.trim())
@@ -53,16 +53,17 @@ export class GoogleSheetsService {
         return result
       })
 
+      console.log(`GoogleSheets: Parsed ${data.length} rows for ${sheetName}`)
       return data
     } catch (error) {
-      console.error(`Error fetching ${sheetName}:`, error)
+      console.error(`GoogleSheets: Error fetching ${sheetName}:`, error)
       return []
     }
   }
 
   async getAllEvents() {
     try {
-      console.log("Starting to fetch all events from Google Sheets...")
+      console.log("GoogleSheets: Starting to fetch all events from Google Sheets...")
 
       const [entregasData, convocatoriasData, solicitudesData] = await Promise.all([
         this.getSheetDataAsCSV("Entregas"),
@@ -70,7 +71,7 @@ export class GoogleSheetsService {
         this.getSheetDataAsCSV("Solicitudes"),
       ])
 
-      console.log("Raw data received:", {
+      console.log("GoogleSheets: Raw data received:", {
         entregas: entregasData.length,
         convocatorias: convocatoriasData.length,
         solicitudes: solicitudesData.length,
@@ -80,10 +81,10 @@ export class GoogleSheetsService {
 
       // Procesar Entregas
       if (entregasData.length > 1) {
-        console.log("Processing Entregas...")
+        console.log("GoogleSheets: Processing Entregas...")
         for (let i = 1; i < entregasData.length; i++) {
           const row = entregasData[i]
-          if (row.length >= 5 && row[0] && row[1]) {
+          if (row.length >= 5 && row[0] && row[1] && row[3]) {
             // Verificar que tenga datos mínimos
             const event = {
               id: `entregas-${i}`,
@@ -97,17 +98,17 @@ export class GoogleSheetsService {
               fechaEntrega: this.parseDate(row[1]), // Fecha Entrega
             }
             events.push(event)
-            console.log(`Added entrega: ${event.title}`)
+            console.log(`GoogleSheets: Added entrega: ${event.title}`)
           }
         }
       }
 
       // Procesar Convocatorias
       if (convocatoriasData.length > 1) {
-        console.log("Processing Convocatorias...")
+        console.log("GoogleSheets: Processing Convocatorias...")
         for (let i = 1; i < convocatoriasData.length; i++) {
           const row = convocatoriasData[i]
-          if (row.length >= 5 && row[0] && row[1]) {
+          if (row.length >= 5 && row[0] && row[1] && row[3]) {
             const event = {
               id: `convocatorias-${i}`,
               title: row[3] || `Convocatoria ${i}`, // Asunto
@@ -120,17 +121,17 @@ export class GoogleSheetsService {
               fechaConvocatoria: this.parseDate(row[1]), // Fecha Convocatoria
             }
             events.push(event)
-            console.log(`Added convocatoria: ${event.title}`)
+            console.log(`GoogleSheets: Added convocatoria: ${event.title}`)
           }
         }
       }
 
       // Procesar Solicitudes
       if (solicitudesData.length > 1) {
-        console.log("Processing Solicitudes...")
+        console.log("GoogleSheets: Processing Solicitudes...")
         for (let i = 1; i < solicitudesData.length; i++) {
           const row = solicitudesData[i]
-          if (row.length >= 5 && row[0] && row[1]) {
+          if (row.length >= 5 && row[0] && row[1] && row[3]) {
             const event = {
               id: `solicitudes-${i}`,
               title: row[3] || `Solicitud ${i}`, // Asunto
@@ -143,15 +144,20 @@ export class GoogleSheetsService {
               fechaSolicitud: this.parseDate(row[1]), // Fecha Solicitud
             }
             events.push(event)
-            console.log(`Added solicitud: ${event.title}`)
+            console.log(`GoogleSheets: Added solicitud: ${event.title}`)
           }
         }
       }
 
-      console.log(`Total events processed: ${events.length}`)
+      console.log(`GoogleSheets: Total events processed: ${events.length}`)
+      console.log(
+        "GoogleSheets: Events summary:",
+        events.map((e) => ({ id: e.id, title: e.title, type: e.type })),
+      )
+
       return events
     } catch (error) {
-      console.error("Error fetching all events:", error)
+      console.error("GoogleSheets: Error fetching all events:", error)
       return []
     }
   }
@@ -191,13 +197,13 @@ export class GoogleSheetsService {
 
       // Verificar si la fecha es válida
       if (isNaN(date.getTime())) {
-        console.warn(`Invalid date: ${dateString}, using current date`)
+        console.warn(`GoogleSheets: Invalid date: ${dateString}, using current date`)
         return new Date().toISOString()
       }
 
       return date.toISOString()
     } catch (error) {
-      console.error(`Error parsing date: ${dateString}`, error)
+      console.error(`GoogleSheets: Error parsing date: ${dateString}`, error)
       return new Date().toISOString()
     }
   }
