@@ -1,10 +1,11 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
+import { Input } from "@/components/ui/input"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import {
   ChevronLeft,
@@ -20,11 +21,13 @@ import {
   Wifi,
   WifiOff,
   Bug,
+  Search,
+  X,
 } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import Link from "next/link"
 import Image from "next/image"
-import { formatDate } from "@/utils/date-helpers"
+import { formatDate, formatRelativeDate } from "@/utils/date-helpers"
 import { convertApiEventToEvent, getDateLabel } from "@/utils/event-helpers"
 import type { Event, ApiEvent } from "@/types/event"
 import LoginForm from "@/components/login-form"
@@ -102,6 +105,8 @@ export default function CalendarPage() {
   const [filteredEvents, setFilteredEvents] = useState<Event[]>([])
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null)
   const [currentDate, setCurrentDate] = useState(new Date())
+  const [searchQuery, setSearchQuery] = useState("")
+  const [showSearchResults, setShowSearchResults] = useState(false)
   const [filters, setFilters] = useState({
     entregas: true,
     convocatorias: true,
@@ -119,6 +124,42 @@ export default function CalendarPage() {
 
   // Instancia del servicio de Google Sheets
   const [sheetsService] = useState(() => new GoogleSheetsClientService())
+
+  // Función para buscar eventos
+  const searchResults = useMemo(() => {
+    if (!searchQuery.trim()) return []
+
+    const query = searchQuery.toLowerCase().trim()
+    const results = events.filter((event) => {
+      // Buscar en título, asunto y descripción
+      const titleMatch = event.title.toLowerCase().includes(query)
+      const subjectMatch = event.subject.toLowerCase().includes(query)
+      const descriptionMatch = event.description.toLowerCase().includes(query)
+
+      return titleMatch || subjectMatch || descriptionMatch
+    })
+
+    // Ordenar por fecha efectiva (más recientes primero)
+    return results.sort((a, b) => b.effectiveDate.getTime() - a.effectiveDate.getTime())
+  }, [events, searchQuery])
+
+  // Función para resaltar texto
+  const highlightText = (text: string, query: string) => {
+    if (!query.trim()) return text
+
+    const regex = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi")
+    const parts = text.split(regex)
+
+    return parts.map((part, index) =>
+      regex.test(part) ? (
+        <mark key={index} className="bg-yellow-200 px-1 rounded">
+          {part}
+        </mark>
+      ) : (
+        part
+      ),
+    )
+  }
 
   useEffect(() => {
     // Verificar si ya está autenticado
@@ -138,6 +179,11 @@ export default function CalendarPage() {
   useEffect(() => {
     filterEvents()
   }, [events, filters])
+
+  useEffect(() => {
+    // Mostrar resultados de búsqueda si hay query
+    setShowSearchResults(searchQuery.trim().length > 0)
+  }, [searchQuery])
 
   const handleLogin = (password: string) => {
     setIsAuthenticated(true)
@@ -238,6 +284,11 @@ export default function CalendarPage() {
 
   const handleFilterChange = (filterType: keyof typeof filters) => {
     setFilters((prev) => ({ ...prev, [filterType]: !prev[filterType] }))
+  }
+
+  const clearSearch = () => {
+    setSearchQuery("")
+    setShowSearchResults(false)
   }
 
   const navigateMonth = (direction: "prev" | "next") => {
@@ -441,8 +492,54 @@ export default function CalendarPage() {
         </Alert>
 
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-          {/* Panel de filtros */}
-          <div className="lg:col-span-1">
+          {/* Panel de filtros y búsqueda */}
+          <div className="lg:col-span-1 space-y-6">
+            {/* Buscador */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg flex items-center">
+                  <Search className="h-5 w-5 mr-2" />
+                  Buscador
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <Input
+                    type="text"
+                    placeholder="Buscar en título, asunto o descripción..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-10 pr-10"
+                  />
+                  {searchQuery && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={clearSearch}
+                      className="absolute right-1 top-1/2 transform -translate-y-1/2 h-8 w-8 p-0"
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
+
+                {searchQuery && (
+                  <div className="text-sm text-gray-600">
+                    {searchResults.length > 0 ? (
+                      <span>
+                        {searchResults.length} resultado{searchResults.length !== 1 ? "s" : ""} encontrado
+                        {searchResults.length !== 1 ? "s" : ""}
+                      </span>
+                    ) : (
+                      <span className="text-red-600">No se encontraron resultados</span>
+                    )}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Filtros */}
             <Card>
               <CardHeader>
                 <CardTitle className="text-lg flex items-center">
@@ -578,121 +675,257 @@ export default function CalendarPage() {
             </Card>
           </div>
 
-          {/* Resto del calendario - sin cambios */}
+          {/* Contenido principal - Calendario o Resultados de búsqueda */}
           <div className="lg:col-span-3">
-            <Card className="calendar-card">
-              <CardContent className="p-6">
-                {/* Calendarios pequeños y navegación */}
-                <div className="flex justify-between items-start mb-6">
-                  {/* Calendario anterior */}
-                  <div className="text-center">
-                    <div className="text-xs font-medium text-gray-600 mb-2">
-                      {prevMonth.monthName} {prevMonth.year}
+            {showSearchResults ? (
+              /* Resultados de búsqueda */
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg flex items-center justify-between">
+                    <div className="flex items-center">
+                      <Search className="h-5 w-5 mr-2" />
+                      Resultados de búsqueda para "{searchQuery}"
                     </div>
-                    <div className="grid grid-cols-7 gap-1 text-xs">
-                      {["L", "M", "X", "J", "V", "S", "D"].map((day) => (
-                        <div key={day} className="w-6 h-6 flex items-center justify-center font-medium text-gray-500">
-                          {day}
-                        </div>
-                      ))}
-                      {prevMonth.weeks.map((week, weekIndex) =>
-                        week.map((day, dayIndex) => (
-                          <div
-                            key={`${weekIndex}-${dayIndex}`}
-                            className="w-6 h-6 flex items-center justify-center text-gray-400"
-                          >
-                            {day || ""}
-                          </div>
-                        )),
-                      )}
+                    <Button variant="outline" size="sm" onClick={clearSearch}>
+                      <X className="h-4 w-4 mr-1" />
+                      Cerrar búsqueda
+                    </Button>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {searchResults.length === 0 ? (
+                    <div className="text-center py-12">
+                      <Search className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                      <h3 className="text-lg font-medium text-gray-900 mb-2">No se encontraron resultados</h3>
+                      <p className="text-gray-600">
+                        No hay eventos que coincidan con "{searchQuery}". Intenta con otros términos.
+                      </p>
                     </div>
-                  </div>
-
-                  {/* Título principal y navegación */}
-                  <div className="text-center flex-1">
-                    <div className="flex items-center justify-center space-x-4 mb-2">
-                      <Button variant="ghost" size="sm" onClick={() => navigateMonth("prev")}>
-                        <ChevronLeft className="h-4 w-4" />
-                      </Button>
-                      <h2 className="text-4xl font-bold">{monthNames[currentDate.getMonth()]}</h2>
-                      <Button variant="ghost" size="sm" onClick={() => navigateMonth("next")}>
-                        <ChevronRight className="h-4 w-4" />
-                      </Button>
-                    </div>
-                    <div className="text-4xl font-bold text-red-600">{currentDate.getFullYear()}</div>
-                  </div>
-
-                  {/* Calendario siguiente */}
-                  <div className="text-center">
-                    <div className="text-xs font-medium text-gray-600 mb-2">
-                      {nextMonth.monthName} {nextMonth.year}
-                    </div>
-                    <div className="grid grid-cols-7 gap-1 text-xs">
-                      {["L", "M", "X", "J", "V", "S", "D"].map((day) => (
-                        <div key={day} className="w-6 h-6 flex items-center justify-center font-medium text-gray-500">
-                          {day}
-                        </div>
-                      ))}
-                      {nextMonth.weeks.map((week, weekIndex) =>
-                        week.map((day, dayIndex) => (
-                          <div
-                            key={`${weekIndex}-${dayIndex}`}
-                            className="w-6 h-6 flex items-center justify-center text-gray-400"
-                          >
-                            {day || ""}
-                          </div>
-                        )),
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Calendario principal */}
-                <div className="calendar-grid">
-                  {/* Encabezados de días */}
-                  <div className="grid grid-cols-7 mb-2">
-                    {dayNames.map((day) => (
-                      <div key={day} className="day-header">
-                        {day}
+                  ) : (
+                    <div className="space-y-4">
+                      <div className="text-sm text-gray-600 mb-4">
+                        {searchResults.length} resultado{searchResults.length !== 1 ? "s" : ""} encontrado
+                        {searchResults.length !== 1 ? "s" : ""} • Ordenado por fecha (más recientes primero)
                       </div>
-                    ))}
-                  </div>
 
-                  {/* Días del calendario */}
-                  <div className="grid grid-cols-7 gap-1">
-                    {days.map((dayInfo, index) => {
-                      const dayEvents = getEventsForDay(dayInfo.date)
-                      const isWeekend = index % 7 >= 5
-
-                      return (
-                        <div
-                          key={index}
-                          className={`day-cell ${!dayInfo.isCurrentMonth ? "other-month" : ""} ${
-                            dayInfo.isToday ? "today" : ""
+                      {searchResults.map((event) => (
+                        <Card
+                          key={event.id}
+                          className={`cursor-pointer transition-all duration-200 hover:shadow-md ${
+                            event.completed ? "opacity-75" : ""
                           }`}
+                          onClick={() => setSelectedEvent(event)}
                         >
-                          <div className={`day-number ${isWeekend && dayInfo.isCurrentMonth ? "weekend" : ""}`}>
-                            {dayInfo.day}
-                          </div>
-                          <div className="events-container">
-                            {dayEvents.map((event) => (
-                              <div
-                                key={event.id}
-                                className={`event-item ${event.completed ? "completed" : ""}`}
-                                style={{ color: eventTypeColors[event.type] }}
-                                onClick={() => setSelectedEvent(event)}
-                              >
-                                {event.title}
+                          <CardContent className="p-4">
+                            <div className="flex items-start justify-between mb-3">
+                              <div className="flex-1">
+                                <h3
+                                  className={`font-medium mb-1 ${event.completed ? "line-through text-gray-500" : ""}`}
+                                >
+                                  {highlightText(event.title, searchQuery)}
+                                </h3>
+                                <div className="flex items-center space-x-2 mb-2 flex-wrap gap-2">
+                                  <Badge
+                                    variant="secondary"
+                                    style={{
+                                      backgroundColor: eventTypeColors[event.type],
+                                      color: "white",
+                                    }}
+                                  >
+                                    {eventTypeLabels[event.type]}
+                                  </Badge>
+                                  <Badge
+                                    variant={event.completed ? "secondary" : "outline"}
+                                    className={
+                                      event.completed ? "bg-gray-500 text-white" : "border-orange-500 text-orange-600"
+                                    }
+                                  >
+                                    {event.completed ? "Completado" : "Pendiente"}
+                                  </Badge>
+                                </div>
+                                <p className="text-sm text-gray-600 mb-2">
+                                  {formatDate(event.effectiveDate)} • {formatRelativeDate(event.effectiveDate)}
+                                </p>
                               </div>
-                            ))}
+                            </div>
+
+                            <div className="space-y-2">
+                              <div>
+                                <h4 className="font-medium text-sm text-gray-700">Asunto</h4>
+                                <p className={`text-sm ${event.completed ? "line-through text-gray-500" : ""}`}>
+                                  {highlightText(event.subject, searchQuery)}
+                                </p>
+                              </div>
+
+                              {event.description && (
+                                <div>
+                                  <h4 className="font-medium text-sm text-gray-700">Descripción</h4>
+                                  <p className={`text-sm ${event.completed ? "line-through text-gray-500" : ""}`}>
+                                    {highlightText(event.description, searchQuery)}
+                                  </p>
+                                </div>
+                              )}
+
+                              <div className="flex items-center justify-between pt-2 border-t">
+                                <div className="flex items-center space-x-4">
+                                  {event.emailLink && (
+                                    <a
+                                      href={event.emailLink}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="inline-flex items-center text-blue-600 hover:text-blue-800 text-sm"
+                                      onClick={(e) => e.stopPropagation()}
+                                    >
+                                      <Mail className="h-4 w-4 mr-1" />
+                                      Ver correo
+                                      <ExternalLink className="h-3 w-3 ml-1" />
+                                    </a>
+                                  )}
+                                </div>
+
+                                <div className="flex items-center space-x-2">
+                                  <Checkbox
+                                    id={`search-completed-${event.id}`}
+                                    checked={event.completed}
+                                    onCheckedChange={(e) => {
+                                      e.stopPropagation()
+                                      toggleEventCompletion(event.id)
+                                    }}
+                                    onClick={(e) => e.stopPropagation()}
+                                  />
+                                  <label
+                                    htmlFor={`search-completed-${event.id}`}
+                                    className="text-sm cursor-pointer"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    {event.completed ? "Completado" : "Pendiente"}
+                                  </label>
+                                </div>
+                              </div>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            ) : (
+              /* Calendario normal */
+              <Card className="calendar-card">
+                <CardContent className="p-6">
+                  {/* Calendarios pequeños y navegación */}
+                  <div className="flex justify-between items-start mb-6">
+                    {/* Calendario anterior */}
+                    <div className="text-center">
+                      <div className="text-xs font-medium text-gray-600 mb-2">
+                        {prevMonth.monthName} {prevMonth.year}
+                      </div>
+                      <div className="grid grid-cols-7 gap-1 text-xs">
+                        {["L", "M", "X", "J", "V", "S", "D"].map((day) => (
+                          <div key={day} className="w-6 h-6 flex items-center justify-center font-medium text-gray-500">
+                            {day}
                           </div>
-                        </div>
-                      )
-                    })}
+                        ))}
+                        {prevMonth.weeks.map((week, weekIndex) =>
+                          week.map((day, dayIndex) => (
+                            <div
+                              key={`${weekIndex}-${dayIndex}`}
+                              className="w-6 h-6 flex items-center justify-center text-gray-400"
+                            >
+                              {day || ""}
+                            </div>
+                          )),
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Título principal y navegación */}
+                    <div className="text-center flex-1">
+                      <div className="flex items-center justify-center space-x-4 mb-2">
+                        <Button variant="ghost" size="sm" onClick={() => navigateMonth("prev")}>
+                          <ChevronLeft className="h-4 w-4" />
+                        </Button>
+                        <h2 className="text-4xl font-bold">{monthNames[currentDate.getMonth()]}</h2>
+                        <Button variant="ghost" size="sm" onClick={() => navigateMonth("next")}>
+                          <ChevronRight className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      <div className="text-4xl font-bold text-red-600">{currentDate.getFullYear()}</div>
+                    </div>
+
+                    {/* Calendario siguiente */}
+                    <div className="text-center">
+                      <div className="text-xs font-medium text-gray-600 mb-2">
+                        {nextMonth.monthName} {nextMonth.year}
+                      </div>
+                      <div className="grid grid-cols-7 gap-1 text-xs">
+                        {["L", "M", "X", "J", "V", "S", "D"].map((day) => (
+                          <div key={day} className="w-6 h-6 flex items-center justify-center font-medium text-gray-500">
+                            {day}
+                          </div>
+                        ))}
+                        {nextMonth.weeks.map((week, weekIndex) =>
+                          week.map((day, dayIndex) => (
+                            <div
+                              key={`${weekIndex}-${dayIndex}`}
+                              className="w-6 h-6 flex items-center justify-center text-gray-400"
+                            >
+                              {day || ""}
+                            </div>
+                          )),
+                        )}
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </CardContent>
-            </Card>
+
+                  {/* Calendario principal */}
+                  <div className="calendar-grid">
+                    {/* Encabezados de días */}
+                    <div className="grid grid-cols-7 mb-2">
+                      {dayNames.map((day) => (
+                        <div key={day} className="day-header">
+                          {day}
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Días del calendario */}
+                    <div className="grid grid-cols-7 gap-1">
+                      {days.map((dayInfo, index) => {
+                        const dayEvents = getEventsForDay(dayInfo.date)
+                        const isWeekend = index % 7 >= 5
+
+                        return (
+                          <div
+                            key={index}
+                            className={`day-cell ${!dayInfo.isCurrentMonth ? "other-month" : ""} ${
+                              dayInfo.isToday ? "today" : ""
+                            }`}
+                          >
+                            <div className={`day-number ${isWeekend && dayInfo.isCurrentMonth ? "weekend" : ""}`}>
+                              {dayInfo.day}
+                            </div>
+                            <div className="events-container">
+                              {dayEvents.map((event) => (
+                                <div
+                                  key={event.id}
+                                  className={`event-item ${event.completed ? "completed" : ""}`}
+                                  style={{ color: eventTypeColors[event.type] }}
+                                  onClick={() => setSelectedEvent(event)}
+                                >
+                                  {event.title}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
           </div>
         </div>
       </div>
